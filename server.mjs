@@ -52,9 +52,10 @@ function listToolsResult() {
           additionalProperties: false,
           properties: {
             spec_id: { type: "string" },
+            spec_url: { type: "string" },
             tag: { type: "string" }
           },
-          required: ["spec_id"]
+          required: []
         }
       },
       {
@@ -65,12 +66,13 @@ function listToolsResult() {
           additionalProperties: false,
           properties: {
             spec_id: { type: "string" },
+            spec_url: { type: "string" },
             operation_id: { type: "string" },
             path_params: { type: "object" },
             query: { type: "object" },
             body: { type: "object" }
           },
-          required: ["spec_id", "operation_id"]
+          required: ["operation_id"]
         }
       }
     ]
@@ -235,32 +237,62 @@ async function handleRegisterSpec(args) {
   };
 }
 
-function handleListOperations(args) {
-  if (typeof args?.spec_id !== "string") throw new Error("invalid_input: spec_id is required");
-  const record = specStore.get(args.spec_id);
-  if (!record) throw new Error("invalid_input: unknown spec_id (register_spec must be called first in same process)");
+async function resolveSpecRecord(args) {
+  const specId = typeof args?.spec_id === "string" ? args.spec_id : null;
+  const specUrl = typeof args?.spec_url === "string" ? args.spec_url : null;
+
+  if (specId) {
+    const record = specStore.get(specId);
+    if (record) {
+      return { specId, record };
+    }
+    if (!specUrl) {
+      throw new Error("invalid_input: unknown spec_id (provide spec_url for stateless mode)");
+    }
+  } else if (!specUrl) {
+    throw new Error("invalid_input: either spec_id or spec_url is required");
+  }
+
+  const spec = await fetchJson(specUrl);
+  const servers = Array.isArray(spec?.servers) ? spec.servers : [];
+  const baseUrl = servers[0]?.url;
+  if (!baseUrl || typeof baseUrl !== "string") {
+    throw new Error("invalid_input: spec missing servers[0].url");
+  }
+
+  const derivedSpecId = crypto.createHash("sha1").update(specUrl).digest("hex").slice(0, 12);
+  const record = {
+    spec,
+    base_url: baseUrl,
+    auth_mode: "none",
+    auth_secret_name: null,
+    operations: collectOperations(spec)
+  };
+  specStore.set(derivedSpecId, record);
+  return { specId: derivedSpecId, record };
+}
+
+async function handleListOperations(args) {
+  const { specId, record } = await resolveSpecRecord(args);
 
   const tag = typeof args?.tag === "string" ? args.tag : null;
   const operations = tag
     ? record.operations.filter((op) => Array.isArray(op.tags) && op.tags.includes(tag))
     : record.operations;
 
-  return { spec_id: args.spec_id, total: operations.length, operations };
+  return { spec_id: specId, total: operations.length, operations };
 }
 
 async function handleCallOperation(args) {
-  if (typeof args?.spec_id !== "string") throw new Error("invalid_input: spec_id is required");
   if (typeof args?.operation_id !== "string") throw new Error("invalid_input: operation_id is required");
-
-  const record = specStore.get(args.spec_id);
-  if (!record) throw new Error("invalid_input: unknown spec_id (register_spec must be called first in same process)");
+  const { specId, record } = await resolveSpecRecord(args);
 
   const match = findOperation(record.spec, args.operation_id);
   if (!match) throw new Error("invalid_input: operation_id not found in spec");
 
   const response = await invokeOperation(record, match, args);
   return {
-    spec_id: args.spec_id,
+    spec_id: specId,
     operation_id: args.operation_id,
     method: match.method,
     path: match.path,
@@ -273,7 +305,7 @@ async function callToolResult(params) {
   const args = params?.arguments ?? {};
 
   if (name === "register_spec") return handleRegisterSpec(args);
-  if (name === "list_operations") return handleListOperations(args);
+  if (name === "list_operations") return await handleListOperations(args);
   if (name === "call_operation") return handleCallOperation(args);
   throw new Error(`invalid_input: unknown tool '${String(name ?? "")}'`);
 }
