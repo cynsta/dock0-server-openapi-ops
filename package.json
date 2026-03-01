@@ -1,0 +1,14 @@
+{
+  "name": "@dock0-labs/server-openapi-ops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for registering and invoking OpenAPI operations.",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
