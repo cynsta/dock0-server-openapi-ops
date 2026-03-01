@@ -132,6 +132,36 @@ function collectOperations(spec) {
   return out;
 }
 
+function interpolateServerUrl(server) {
+  if (!server || typeof server.url !== "string") return null;
+
+  const variables = server.variables && typeof server.variables === "object" ? server.variables : {};
+  return server.url.replaceAll(/\{([^}]+)\}/g, (_, name) => {
+    const variable = variables[name];
+    if (variable && typeof variable.default === "string") return variable.default;
+    return "";
+  });
+}
+
+function resolveBaseUrlFromSpec(spec, specUrl) {
+  const servers = Array.isArray(spec?.servers) ? spec.servers : [];
+  const interpolated = interpolateServerUrl(servers[0]);
+
+  if (!interpolated) {
+    throw new Error("invalid_input: spec missing servers[0].url");
+  }
+
+  try {
+    return new URL(interpolated).toString();
+  } catch {
+    try {
+      return new URL(interpolated, specUrl).toString();
+    } catch {
+      throw new Error("invalid_input: unresolved servers[0].url");
+    }
+  }
+}
+
 function findOperation(spec, operationId) {
   const paths = spec?.paths ?? {};
   for (const [path, methods] of Object.entries(paths)) {
@@ -152,7 +182,12 @@ function buildUrl(baseUrl, pathTemplate, pathParams = {}, query = {}) {
     path = path.replaceAll(`{${k}}`, encodeURIComponent(String(v)));
   }
 
-  const u = new URL(path, baseUrl);
+  let u;
+  try {
+    u = new URL(path, baseUrl);
+  } catch {
+    throw new Error("invalid_input: unresolved request URL from spec server + path");
+  }
   for (const [k, v] of Object.entries(query ?? {})) {
     if (v === undefined || v === null) continue;
     u.searchParams.set(k, String(v));
@@ -212,11 +247,7 @@ async function handleRegisterSpec(args) {
   if (typeof args?.spec_url !== "string") throw new Error("invalid_input: spec_url is required");
   const spec = await fetchJson(args.spec_url);
 
-  const servers = Array.isArray(spec?.servers) ? spec.servers : [];
-  const baseUrl = servers[0]?.url;
-  if (!baseUrl || typeof baseUrl !== "string") {
-    throw new Error("invalid_input: spec missing servers[0].url");
-  }
+  const baseUrl = resolveBaseUrlFromSpec(spec, args.spec_url);
 
   const specId = crypto.createHash("sha1").update(args.spec_url).digest("hex").slice(0, 12);
   const operations = collectOperations(spec);
@@ -254,11 +285,7 @@ async function resolveSpecRecord(args) {
   }
 
   const spec = await fetchJson(specUrl);
-  const servers = Array.isArray(spec?.servers) ? spec.servers : [];
-  const baseUrl = servers[0]?.url;
-  if (!baseUrl || typeof baseUrl !== "string") {
-    throw new Error("invalid_input: spec missing servers[0].url");
-  }
+  const baseUrl = resolveBaseUrlFromSpec(spec, specUrl);
 
   const derivedSpecId = crypto.createHash("sha1").update(specUrl).digest("hex").slice(0, 12);
   const record = {
