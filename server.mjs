@@ -333,6 +333,14 @@ async function handleCallOperation(args) {
   if (!match) throw new Error("invalid_input: operation_id not found in spec");
 
   const response = await invokeOperation(record, match, args);
+  if (response.status < 200 || response.status >= 300) {
+    const detail =
+      response.json && typeof response.json === "object"
+        ? JSON.stringify(response.json).slice(0, 300)
+        : String(response.text ?? "").replace(/\s+/g, " ").slice(0, 300);
+    throw new Error(`upstream_error: HTTP ${response.status}${detail ? ` (${detail})` : ""}`);
+  }
+
   return {
     spec_id: specId,
     operation_id: args.operation_id,
