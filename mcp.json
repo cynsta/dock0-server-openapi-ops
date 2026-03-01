@@ -1,0 +1,7 @@
+{
+  "runtime": "typescript",
+  "command": "node",
+  "args": ["server.mjs"],
+  "entryPoint": "server.mjs",
+  "env": {}
+}
