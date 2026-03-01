@@ -182,12 +182,27 @@ function buildUrl(baseUrl, pathTemplate, pathParams = {}, query = {}) {
     path = path.replaceAll(`{${k}}`, encodeURIComponent(String(v)));
   }
 
-  let u;
-  try {
-    u = new URL(path, baseUrl);
-  } catch {
-    throw new Error("invalid_input: unresolved request URL from spec server + path");
+  let u = null;
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      u = new URL(path);
+    } catch {
+      throw new Error("invalid_input: unresolved request URL from spec server + path");
+    }
+  } else {
+    try {
+      const base = new URL(baseUrl);
+      const basePath = base.pathname.endsWith("/") ? base.pathname.slice(0, -1) : base.pathname;
+      const opPath = path.startsWith("/") ? path : `/${path}`;
+      base.pathname = `${basePath}${opPath}`.replace(/\/{2,}/g, "/");
+      base.search = "";
+      base.hash = "";
+      u = base;
+    } catch {
+      throw new Error("invalid_input: unresolved request URL from spec server + path");
+    }
   }
+
   for (const [k, v] of Object.entries(query ?? {})) {
     if (v === undefined || v === null) continue;
     u.searchParams.set(k, String(v));
